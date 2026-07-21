@@ -65,12 +65,12 @@ async def get_pharma_advice(req: PharmaRequest):
         
         if any(kw in req.message.lower() for kw in emergency_keywords):
             return {
-                "advice": "🚨 **URGENCE MÉDICALE DÉTECTÉE**\n\n"
+                "advice": " **URGENCE MÉDICALE DÉTECTÉE**\n\n"
                          "Ne prenez aucun médicament.\n"
                          "Appelez immédiatement le **112** ou rendez-vous aux urgences.\n\n"
                          "**Numéros d'urgence :**\n"
                          "🚑 SAMU : 112 (gratuit)\n"
-                         "🏥 Urgences 24h/24",
+                         " Urgences 24h/24",
                 "urgency_level": "critical",
                 "sources": []
             }
@@ -106,14 +106,15 @@ async def get_pharma_advice(req: PharmaRequest):
         }
 
     except Exception as e:
-    print(f" Erreur IA : {e}")
-    print(f"❌ Type : {type(e).__name__}")
-    print(f" Clé API présente : {bool(os.getenv('OPENAI_API_KEY'))}")
-    print(f" Détails complets : {str(e)}")
-    
-    # Message d'erreur plus détaillé
-    error_detail = str(e)
-    raise HTTPException(status_code=500, detail=f"Erreur IA: {error_detail}")
+        # ✅ CORRECTION : Indentation correcte ici (4 espaces)
+        print(f" Erreur IA : {e}")
+        print(f"❌ Type : {type(e).__name__}")
+        print(f" Clé API présente : {bool(os.getenv('OPENAI_API_KEY'))}")
+        print(f" Détails complets : {str(e)}")
+        
+        # Message d'erreur plus détaillé
+        error_detail = str(e)
+        raise HTTPException(status_code=500, detail=f"Erreur IA: {error_detail}")
 
 @app.get("/")
 def root():
