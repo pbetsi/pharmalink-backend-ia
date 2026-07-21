@@ -106,8 +106,14 @@ async def get_pharma_advice(req: PharmaRequest):
         }
 
     except Exception as e:
-        print(f"❌ Erreur IA : {e}")
-        raise HTTPException(status_code=500, detail="Erreur serveur IA")
+    print(f" Erreur IA : {e}")
+    print(f"❌ Type : {type(e).__name__}")
+    print(f" Clé API présente : {bool(os.getenv('OPENAI_API_KEY'))}")
+    print(f" Détails complets : {str(e)}")
+    
+    # Message d'erreur plus détaillé
+    error_detail = str(e)
+    raise HTTPException(status_code=500, detail=f"Erreur IA: {error_detail}")
 
 @app.get("/")
 def root():
