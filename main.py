@@ -1,25 +1,31 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from openai import OpenAI
-import os
+from openai import OpenAI, APIConnectionError, AuthenticationError
 from dotenv import load_dotenv
+import os
 
+# Charger les variables d'environnement
 load_dotenv()
 
 app = FastAPI(title="Pharmalink AI API")
 
-# ✅ Activer CORS (pour autoriser Flutter Web)
+# ✅ Activer CORS (pour autoriser Flutter Web et Hoppscotch)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En production, remplacez par votre domaine
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ✅ Configuration OpenAI
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# ✅ Configuration OpenAI avec TIMEOUT et RETRIES (Crucial pour Render)
+# Si la connexion échoue, il réessaiera 2 fois et attendra max 30 secondes
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    timeout=30.0,  # Timeout de 30 secondes
+    max_retries=2  # Réessayer 2 fois en cas d'échec
+)
 
 # ✅ Modèle de requête
 class PharmaRequest(BaseModel):
@@ -42,11 +48,11 @@ Ne prenez aucun médicament. Appelez immédiatement le 112 ou rendez-vous aux ur
 
 3. 👶 ENFANTS : Si patient_age < 12 ans → Recommander systématiquement de consulter un pédiatre ou pharmacien.
 
-4.  INTERACTIONS : Si current_medications contient plusieurs médicaments → Vérifier les interactions dangereuses.
+4. 💊 INTERACTIONS : Si current_medications contient plusieurs médicaments → Vérifier les interactions dangereuses.
 
 5. 📋 FORMAT DE RÉPONSE :
 ✅ Conseil (recommandation claire)
-️ Précautions (contre-indications, effets secondaires)
+⚠️ Précautions (contre-indications, effets secondaires)
 📞 Quand consulter (symptômes d'alerte)
 
 6. Ne diagnoses JAMAIS. Oriente vers un professionnel de santé.
@@ -57,25 +63,25 @@ Ne prenez aucun médicament. Appelez immédiatement le 112 ou rendez-vous aux ur
 @app.post("/api/pharma-ai")
 async def get_pharma_advice(req: PharmaRequest):
     try:
-        # ✅ Vérification urgence (mots-clés)
+        # ✅ 1. Vérification urgence (mots-clés)
         emergency_keywords = [
             "douleur thoracique", "coeur", "respiration", "étouffe", 
-            "perdu connaissance", "saigne", "urgence", "112", "crise"
+            "perdu connaissance", "saigne", "urgence", "112", "crise", "inconscient"
         ]
         
         if any(kw in req.message.lower() for kw in emergency_keywords):
             return {
-                "advice": " **URGENCE MÉDICALE DÉTECTÉE**\n\n"
+                "advice": "🚨 **URGENCE MÉDICALE DÉTECTÉE**\n\n"
                          "Ne prenez aucun médicament.\n"
                          "Appelez immédiatement le **112** ou rendez-vous aux urgences.\n\n"
                          "**Numéros d'urgence :**\n"
                          "🚑 SAMU : 112 (gratuit)\n"
-                         " Urgences 24h/24",
+                         "🏥 Urgences 24h/24",
                 "urgency_level": "critical",
                 "sources": []
             }
 
-        # ✅ Construction du contexte patient
+        # ✅ 2. Construction du contexte patient
         patient_context = f"""
         **Profil du patient :**
         - Âge : {req.patient_age} ans
@@ -86,39 +92,46 @@ async def get_pharma_advice(req: PharmaRequest):
         **Question :** {req.message}
         """
 
-        # ✅ Appel à OpenAI GPT-4o-mini (économique)
+        # ✅ 3. Appel à OpenAI (Modèle GPT-4o-mini pour rapidité/coût)
+        print(f"📡 Envoi de la requête à OpenAI...")
+        
         response = client.chat.completions.create(
-            model="gpt-4o-mini",  # ~0.01€ pour 100 questions
+            model="gpt-4o-mini", 
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": patient_context}
             ],
-            temperature=0.3,  # Faible pour plus de précision
+            temperature=0.3,
             max_tokens=500
         )
 
         advice = response.choices[0].message.content
+        print(f"✅ Réponse reçue de l'IA")
 
         return {
             "advice": advice,
             "urgency_level": "low",
-            "sources": ["OMS", "ANSM"]  # À améliorer avec RAG
+            "sources": ["OMS", "ANSM"]
         }
 
+    # ✅ GESTION DES ERREURS SPÉCIFIQUES
+    except AuthenticationError as e:
+        print(f"❌ ERREUR AUTHENTIFICATION: Clé API invalide")
+        raise HTTPException(status_code=401, detail="Clé API OpenAI invalide ou expirée")
+
+    except APIConnectionError as e:
+        print(f"❌ ERREUR CONNEXION: Impossible de joindre OpenAI")
+        print(f"Détails: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"Service OpenAI indisponible: {str(e)}")
+
     except Exception as e:
-        # ✅ CORRECTION : Indentation correcte ici (4 espaces)
-        print(f" Erreur IA : {e}")
-        print(f"❌ Type : {type(e).__name__}")
-        print(f" Clé API présente : {bool(os.getenv('OPENAI_API_KEY'))}")
-        print(f" Détails complets : {str(e)}")
-        
-        # Message d'erreur plus détaillé
-        error_detail = str(e)
-        raise HTTPException(status_code=500, detail=f"Erreur IA: {error_detail}")
+        print(f"❌ Erreur inattendue: {type(e).__name__}")
+        print(f"Détails: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erreur serveur: {str(e)}")
 
 @app.get("/")
 def root():
-    return {"message": " API Pharmalink IA - Conseil Pharmaceutique"}
+    return {"message": "✅ API Pharmalink IA - Conseil Pharmaceutique"}
 
 if __name__ == "__main__":
     import uvicorn
